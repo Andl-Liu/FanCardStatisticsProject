@@ -8,8 +8,6 @@
 #       jsonp: 可不需要
 #       next: 当mode=1时，按时间从晚到早排序，当为第一批被加载出来的评论时，该参数为0，否则该参数为上一批被加载出来的评论的最后一个评论的楼层号；
 #             当mode=3时，按热度从高到低排序，当为第一批被加载出来的评论时，该参数为0，除此之外，当为第n批被加载出来的评论时，该参数为n;
-#             next=0时，代表开始；
-#             next=1时，代表结束；
 # #     type: 不明，但都为1
 #       oid: av号
 #       mode: 评论显示方式，当mode=2时，按时间从晚到早排序，当mode=3时，按热度从高到低排序
@@ -21,25 +19,28 @@
 #   当按时间排序时，将要加载的20条评论中，若是有被抽楼的，则不会在被传回来的json文件中，也就是说每次并不都是20条评论
 #
 # 为了方便统计评论的时间和被抽的楼层数，我决定采用按时间排序的方法获取评论
-import time
 import requests
 import csv
 
 
-def process_data(reps, csv_writer):
+def process_data(reps, csv_writer, floor=0):
     # json数据
     comments_json = reps.json()
+
+    # 当"replies"对应的值为空值时，到达评论区底部停止爬取
+    if not comments_json["data"].get("replies", 0):
+        return True, floor
+
     comments_json = comments_json["data"]["replies"]
     # 用于储存需要的评论数据
     dic = {}
 
-    floor = 1
     for comment in comments_json:
         # 楼层
         dic["floor"] = comment["floor"]
         floor = comment["floor"]
         # 评论时间
-        dic["ctime"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(comment["ctime"]))
+        dic["ctime"] = comment["ctime"]
 
         member = comment["member"]
         # 用户名称
@@ -62,7 +63,8 @@ def process_data(reps, csv_writer):
         dic["fanCard_id"] = "000000"
         # 装扮所属up主
         dic["fanCard_up"] = "无"
-        if member["user_sailing"].get("cardbg", 0):
+        # 当该用户有个性粉丝装扮的时候
+        if member["user_sailing"].get("cardbg", 0) and member["user_sailing"]["cardbg"]["fan"]["is_fan"] == 1:
             cardbg = member["user_sailing"]["cardbg"]
             dic["fanCard_name"] = cardbg["name"]
             dic["fanCard_id"] = cardbg["fan"]["num_desc"]
@@ -74,7 +76,7 @@ def process_data(reps, csv_writer):
         # 保存到文件中
         csv_writer.writerow(dic.values())
     print(f"已处理至{floor}")
-    return floor
+    return False, floor
 
 
 if __name__ == "__main__":
@@ -84,15 +86,19 @@ if __name__ == "__main__":
         "User_Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0"
     }
 
+    # av号
+    # 797915674
+    av = "797915674"
+
     params = {
         "next": 0,
         "type": 1,
-        "oid": 797915674,
+        "oid": av,
         "mode": 2,
         "plat": 1
     }
 
-    f = open(".\\data.csv", mode="w", newline="", encoding='utf-8')
+    f = open(f".\\{av}.csv", mode="w", newline="", encoding='utf-8')
     csvWriter = csv.writer(f)
 
     # 表头
@@ -101,13 +107,14 @@ if __name__ == "__main__":
     csvWriter.writerow(header)
 
     page = 0
-    while page != 1:
+    isOver = False
+    while not isOver:
         # 更新参数
         params["next"] = page
         # 获取评论
         response = requests.get(url=url, params=params, headers=headers)
         # 加工数据
-        page = process_data(response, csvWriter)
+        (isOver, page) = process_data(response, csvWriter)
         response.close()
 
     f.close()
